@@ -1,0 +1,350 @@
+/* LMU SOM AI Color Palette - Green Version */
+:root {
+  --lmu-primary: #00883a; /* LMU green */
+  --lmu-secondary: #04724a; /* Darker green */
+  --lmu-accent: #f7a501; /* LMU yellow/gold */
+  --lmu-light: #f6f6f6; /* Light background */
+  --lmu-dark: #333333; /* Dark text */
+  --lmu-text: #4a4a4a; /* Main text color */
+  --lmu-link: #048850; /* Link color */
+  --lmu-border: #e5e5e5; /* Light border */
+  --lmu-hover: #00742c; /* Darker green for hover */
+}
+
+/* Main App Styling */
+body {
+  font-family: 'Open Sans', sans-serif;
+  color: var(--lmu-text);
+  background-color: white;
+  line-height: 1.6;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Roboto', sans-serif;
+  font-weight: 500;
+  color: var(--lmu-dark);
+}
+
+.App {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.container {
+  flex: 1;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+a {
+  color: var(--lmu-link);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+a:hover {
+  color: var(--lmu-hover);
+}
+
+/* Button styling */
+.btn-primary {
+  background-color: var(--lmu-primary) !important;
+  border-color: var(--lmu-primary) !important;
+}
+
+.btn-primary:hover {
+  background-color: var(--lmu-hover) !important;
+  border-color: var(--lmu-hover) !important;
+}
+
+.btn-outline-primary {
+  color: var(--lmu-primary) !important;
+  border-color: var(--lmu-primary) !important;
+}
+
+.btn-outline-primary:hover {
+  color: white !important;
+  background-color: var(--lmu-primary) !important;
+}
+
+.btn-outline-secondary {
+  color: var(--lmu-secondary) !important;
+  border-color: var(--lmu-secondary) !important;
+}
+
+.btn-outline-secondary:hover {
+  color: white !important;
+  background-color: var(--lmu-secondary) !important;
+}
+
+/* Form styling */
+.login-form,
+.register-form {
+  max-width: 500px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.form-control:focus {
+  border-color: var(--lmu-primary);
+  box-shadow: 0 0 0 0.2rem rgba(4, 136, 80, 0.25);
+}
+
+/* Publication listing styling - LMU SOM AI style */
+.publications-container {
+  margin: 30px 0;
+}
+
+.publications-header {
+  margin-bottom: 40px;
+  border-bottom: 2px solid var(--lmu-border);
+  padding-bottom: 15px;
+}
+
+.publications-header h2 {
+  font-weight: 500;
+  color: var(--lmu-primary);
+}
+
+.publications-filters {
+  margin-bottom: 30px;
+}
+
+.year-section {
+  margin-bottom: 40px;
+}
+
+.year-header {
+  font-size: 1.8rem;
+  font-weight: 500;
+  color: var(--lmu-primary);
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--lmu-border);
+  padding-bottom: 10px;
+}
+
+.publication-item {
+  margin-bottom: 30px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--lmu-border);
+}
+
+.publication-title {
+  font-weight: 500;
+  font-size: 1.3rem;
+  margin-bottom: 8px;
+}
+
+.publication-title a {
+  color: var(--lmu-primary);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.publication-title a:hover {
+  color: var(--lmu-hover);
+}
+
+.publication-authors {
+  color: var(--lmu-text);
+  margin-bottom: 5px;
+  font-size: 1.1rem;
+}
+
+.publication-authors a {
+  color: var(--lmu-text);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.publication-authors a:hover {
+  color: var(--lmu-link);
+}
+
+.publication-venue {
+  font-style: italic;
+  color: var(--lmu-secondary);
+  font-size: 1.05rem;
+  margin-top: 5px;
+}
+
+.publication-links {
+  margin-top: 12px;
+}
+
+.publication-links a {
+  margin-right: 15px;
+  font-size: 0.9rem;
+  color: var(--lmu-link);
+  text-decoration: none;
+}
+
+.publication-links a:hover {
+  text-decoration: underline;
+}
+
+/* Publication detail styling - LMU SOM AI style */
+.publication-detail-container {
+  max-width: 900px;
+  margin: 40px auto;
+}
+
+.publication-detail-header {
+  margin-bottom: 35px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--lmu-border);
+}
+
+.publication-detail-title {
+  font-size: 2rem;
+  font-weight: 500;
+  color: var(--lmu-primary);
+  margin-bottom: 20px;
+  line-height: 1.3;
+}
+
+.publication-detail-authors {
+  font-size: 1.2rem;
+  color: var(--lmu-text);
+  margin-bottom: 15px;
+}
+
+.publication-detail-authors .author-link {
+  color: var(--lmu-text);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.publication-detail-authors .author-link:hover {
+  color: var(--lmu-link);
+}
+
+.publication-detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 15px;
+  color: var(--lmu-secondary);
+  font-size: 1.1rem;
+}
+
+.publication-year {
+  font-weight: 600;
+}
+
+.publication-type {
+  color: var(--lmu-accent);
+}
+
+.publication-venue {
+  font-style: italic;
+}
+
+.publication-section {
+  margin-bottom: 30px;
+}
+
+.section-title {
+  font-size: 1.5rem;
+  font-weight: 500;
+  color: var(--lmu-primary);
+  margin-bottom: 15px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--lmu-border);
+}
+
+.publication-abstract {
+  font-size: 1.1rem;
+  line-height: 1.6;
+  color: var(--lmu-text);
+}
+
+.publication-details {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.detail-item {
+  display: flex;
+  flex-direction: row;
+  gap: 10px;
+  font-size: 1.1rem;
+}
+
+.detail-label {
+  font-weight: 600;
+  min-width: 60px;
+  color: var(--lmu-dark);
+}
+
+.detail-value {
+  color: var(--lmu-link);
+}
+
+.publication-actions {
+  margin-top: 40px;
+  padding-top: 20px;
+  border-top: 1px solid var(--lmu-border);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+/* Publication cards */
+.card {
+  transition: all 0.3s ease;
+}
+
+.card:hover {
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+  transform: translateY(-2px);
+}
+
+/* Author badges */
+.badge {
+  cursor: pointer;
+}
+
+/* Search input */
+.search-container {
+  margin-bottom: 20px;
+}
+
+/* Publication detail page */
+.publication-abstract {
+  line-height: 1.6;
+  margin-top: 15px;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .container {
+    padding: 0 15px;
+  }
+  
+  .login-form,
+  .register-form {
+    padding: 15px;
+  }
+  
+  .year-header {
+    font-size: 1.5rem;
+  }
+  
+  .publication-title {
+    font-size: 1.2rem;
+  }
+  
+  .publication-detail-title {
+    font-size: 1.6rem;
+  }
+  
+  .publication-detail-authors {
+    font-size: 1.1rem;
+  }
+  
+  .section-title {
+    font-size: 1.3rem;
+  }
+}

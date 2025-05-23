@@ -172,3 +172,11 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+*.db
+*.sql
+*.bib
+
+.DS_Store
+
+*mcml*

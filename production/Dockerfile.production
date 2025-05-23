@@ -1,0 +1,52 @@
+FROM node:18-alpine AS frontend-build
+
+# Set working directory for frontend build
+WORKDIR /frontend-build
+
+# Copy frontend package.json and install dependencies
+COPY ./frontend/package.json ./
+RUN npm install
+
+# Copy frontend source code and build
+COPY ./frontend/ ./
+RUN npm run build
+
+# Start with a new Python base image for the final container
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Copy backend requirements and install dependencies
+COPY ./backend/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Install Nginx
+RUN apt-get update && apt-get install -y --no-install-recommends nginx supervisor \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy built frontend from the frontend-build stage to Nginx's serve directory
+COPY --from=frontend-build /frontend-build/build /var/www/html
+
+# Create Nginx configuration
+RUN rm /etc/nginx/sites-enabled/default
+COPY ./production/nginx.conf /etc/nginx/sites-available/
+RUN ln -s /etc/nginx/sites-available/nginx.conf /etc/nginx/sites-enabled/
+
+# Copy backend code
+COPY ./backend /app/backend
+COPY ./backend/app /app/app
+
+# Copy supervisor configuration
+COPY ./production/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV SERVE_STATIC=true
+
+# Expose port
+EXPOSE 80
+
+# Start Nginx and uvicorn using supervisor
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

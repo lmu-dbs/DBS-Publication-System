@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: ./backend/Dockerfile
+    container_name: publications-backend
+    volumes:
+      - ./data:/app/data
+      - ./backend:/app/backend
+      - ./backend/app:/app/app
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=sqlite:///./data/publications.db
+      - SECRET_KEY=your_secret_key_change_in_production
+      - ADMIN_USERNAME=admin
+      - ADMIN_PASSWORD=root
+      - SERVE_STATIC=false
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: ./frontend/Dockerfile
+    container_name: publications-frontend
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://localhost:8000
+      - CHOKIDAR_USEPOLLING=true
+      - WDS_SOCKET_HOST=127.0.0.1
+      - WDS_SOCKET_PORT=3000
+    depends_on:
+      - backend
+    restart: unless-stopped
