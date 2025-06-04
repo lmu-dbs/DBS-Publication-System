@@ -458,7 +458,7 @@ def export_bibtex(publication_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Failed to generate BibTeX: {str(e)}")
 
 # Export publications as JSON
-@router.get("/export-json")
+@router.get("/bulk-exports/json")
 def export_json(
     db: Session = Depends(get_db),
     author_id: Optional[int] = None,
@@ -534,3 +534,90 @@ def export_json(
         result.append(pub_dict)
     
     return {"publications": result}
+
+# Export publications as BibTeX
+@router.get("/bulk-exports/bibtex")
+def export_bibtex_list(
+    db: Session = Depends(get_db),
+    author_id: Optional[int] = None,
+    search: Optional[str] = None,
+    venue: Optional[str] = None,
+    year: Optional[int] = None,
+    keyword: Optional[str] = None
+):
+    # Reuse the same query logic from get_publications
+    query = db.query(Publication)
+    
+    if author_id is not None:
+        query = query.join(Publication.author_associations).filter(PublicationAuthor.author_id == author_id)
+    
+    if search:
+        search_term = f"%{search}%"
+        query = query.filter(
+            or_(
+                Publication.title.ilike(search_term),
+                Publication.abstract.ilike(search_term),
+                Publication.venue.ilike(search_term),
+                # Join with authors to search in author names
+                Publication.author_associations.any(
+                    PublicationAuthor.author.has(
+                        Author.name.ilike(search_term)
+                    )
+                )
+            )
+        )
+    
+    # Filter by venue if provided
+    if venue:
+        venue_term = f"%{venue}%"
+        query = query.filter(Publication.venue.ilike(venue_term))
+    
+    # Filter by year if provided
+    if year:
+        query = query.filter(Publication.year == year)
+    
+    # Filter by keyword if provided
+    if keyword:
+        keyword_term = f"%{keyword}%"
+        query = query.filter(
+            or_(
+                Publication.title.ilike(keyword_term),
+                Publication.abstract.ilike(keyword_term),
+                Publication.venue.ilike(keyword_term),
+                # Join with authors to search in author names
+                Publication.author_associations.any(
+                    PublicationAuthor.author.has(
+                        Author.name.ilike(keyword_term)
+                    )
+                )
+            )
+        )
+    
+    publications = query.order_by(Publication.year.desc()).all()
+    
+    # Generate BibTeX for all publications
+    all_bibtex = ""
+    
+    for pub in publications:
+        # If publication has stored BibTeX, use it
+        if pub.bibtex:
+            all_bibtex += pub.bibtex + "\n\n"
+        else:
+            # Otherwise, generate BibTeX from publication data
+            try:
+                # Get authors in the correct order
+                authors = [author.name for author in pub.authors]
+                bibtex = generate_bibtex(
+                    pub.title,
+                    authors,
+                    pub.year,
+                    pub.venue,
+                    pub.publication_type,
+                    pub.doi
+                )
+                all_bibtex += bibtex + "\n\n"
+            except Exception as e:
+                # Skip problematic entries but continue with the rest
+                print(f"Error generating BibTeX for publication {pub.id}: {str(e)}")
+    
+    return {"bibtex": all_bibtex}

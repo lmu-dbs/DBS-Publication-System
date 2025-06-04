@@ -98,7 +98,20 @@ export const publicationService = {
   },
 
   exportJson: async (authorId = null, search = null, venue = null, year = null, keyword = null) => {
-    let url = '/publications/export-json';
+    let url = '/publications/bulk-exports/json';
+    const params = {};
+    
+    if (authorId) params.author_id = authorId;
+    if (search) params.search = search;
+    if (venue) params.venue = venue;
+    if (year) params.year = year;
+    if (keyword) params.keyword = keyword;
+    
+    return await api.get(url, { params });
+  },
+  
+  exportBibtexList: async (authorId = null, search = null, venue = null, year = null, keyword = null) => {
+    let url = '/publications/bulk-exports/bibtex';
     const params = {};
     
     if (authorId) params.author_id = authorId;

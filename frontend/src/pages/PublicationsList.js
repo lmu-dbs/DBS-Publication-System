@@ -135,6 +135,48 @@ const PublicationsList = () => {
     }
   };
   
+  const handleExportBibtex = async () => {
+    try {
+      const response = await publicationService.exportBibtexList(
+        authorId, 
+        keywordFilter, 
+        venueFilter,
+        yearFilter,
+        keywordFilter
+      );
+      
+      // Create a blob and download the BibTeX file
+      const blob = new Blob([response.data.bibtex], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      
+      // Create filename with current filters
+      let filename = 'publications';
+      if (authorName) {
+        filename += `_by_${authorName.toLowerCase().replace(/\s+/g, '_')}`;
+      }
+      if (venueFilter) {
+        filename += `_venue_${venueFilter.toLowerCase().replace(/\s+/g, '_')}`;
+      }
+      if (yearFilter) {
+        filename += `_year_${yearFilter}`;
+      }
+      if (keywordFilter) {
+        filename += `_keyword_${keywordFilter.toLowerCase().replace(/\s+/g, '_')}`;
+      }
+      
+      a.download = `${filename}.bib`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Error exporting BibTeX:', error);
+      setError('Failed to export publications as BibTeX.');
+    }
+  };
+  
   const clearFilters = () => {
     setSearchTerm('');
     setVenueFilter('');
@@ -434,8 +476,11 @@ const PublicationsList = () => {
           ))}
           
           <div className="text-center mt-5 mb-4 pt-3 border-top">
-            <Button variant="outline-secondary" onClick={handleExportJson}>
+            <Button variant="outline-secondary" onClick={handleExportJson} className="me-2">
               Export as JSON
+            </Button>
+            <Button variant="outline-secondary" onClick={handleExportBibtex}>
+              Export as BibTeX
             </Button>
           </div>
         </div>
