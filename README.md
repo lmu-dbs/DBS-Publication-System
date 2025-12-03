@@ -2,6 +2,8 @@
 
 A Docker-based publication list system that allows users to manage academic publications. This system consists of a FastAPI backend and a React frontend, both containerized with Docker.
 
+**Note**: Most of the code in this project is AI-generated.
+
 ![Overview of the Startpage](images/startpage.png "Startpage")
 
 ## Features
@@ -11,15 +13,28 @@ A Docker-based publication list system that allows users to manage academic publ
 - **Search Functionality**: Search publications by title, abstract, or venue
 - **User Authentication**: Register and login to access administrative features
 - **Publication Management**: Add, edit, and delete publications (for authenticated users)
+- **Web Scraping**: 
+  - Scrape publications from custom URLs
+  - Scrape publications from MCML website
+  - AI-powered text-to-BibTeX conversion using NVIDIA NIM API or local Llama model
+  - Review and edit scraped publications before adding to main database
+  - Reprocess failed BibTeX entries
+  - Export all scraped publications as BibTeX
 - **BibTeX Support**: 
   - Import publications from BibTeX data (single entry or batch import)
   - Import publications from BibTeX files 
   - Export individual publications as BibTeX
+  - Export bulk publications as BibTeX
 - **JSON Export**: Export filtered publication lists as JSON
-- **Author Management**: Automatically create new authors or link to existing ones
+- **Author Management**: 
+  - View all authors with publication counts
+  - Edit author information (name, email, affiliation)
+  - Merge duplicate authors
+  - Filter publications by author
+  - Automatically create new authors or link to existing ones
 - **Pagination**: Browse through large publication lists with pagination
 - **Publication Details**: View comprehensive details for each publication
-- **Duplicate Detection**: Prevent duplicate entries during BibTeX import
+- **Duplicate Detection**: Prevent duplicate entries during BibTeX import and web scraping
 - **Error Handling**: Get detailed feedback on import failures
 - **Publication Types**: Support for different academic publication types
 - **DOI and URL Support**: Store and display DOI and URL for easy reference
@@ -38,9 +53,14 @@ A Docker-based publication list system that allows users to manage academic publ
    cp .env.example .env
    ```
 
-2. Edit the `.env` file and add your API keys:
-   - `HF_TOKEN`: Your Hugging Face API token (required for accessing HF models)
+2. Edit the `.env` file and configure the following variables:
+   - `HF_TOKEN`: Your Hugging Face API token (required for accessing HF models for local Llama fallback)
+     - Get your token from: https://huggingface.co/settings/tokens
    - `NVIDIA_TOKEN`: Your NVIDIA NIM API key (optional, but recommended for better performance)
+     - Get your key from: https://build.nvidia.com/
+   - `SECRET_KEY`: Secret key for JWT token generation (generate with: `openssl rand -hex 32`)
+   - `ADMIN_USERNAME`: Admin username for initial setup (default: admin)
+   - `ADMIN_PASSWORD`: Admin password - **change this immediately after first login**
    
    **Note**: The system uses NVIDIA NIM API for text-to-BibTeX conversion by default, with automatic fallback to the local Llama model if the API is unavailable or the key is not set.
 
@@ -54,7 +74,7 @@ A Docker-based publication list system that allows users to manage academic publ
 
 2. Start the application using Docker Compose:
    ```
-   docker-compose up -d
+   docker-compose up --build
    ```
 
 3. Access the application:
@@ -90,22 +110,36 @@ A Docker-based publication list system that allows users to manage academic publ
    - Delete publications you've created
    - Maintain author order for correct citation formatting
 
-5. **BibTeX Management**:
+5. **Web Scraping** (requires authentication):
+   - Scrape publications from custom URLs or MCML website
+   - AI converts raw text to BibTeX format using NVIDIA NIM API or local Llama model
+   - Review scraped publications in a dedicated interface
+   - Edit raw text and reprocess BibTeX if needed
+   - Add approved scraped publications to main database
+   - Export all scraped publications as BibTeX file
+   - Automatic duplicate detection prevents adding existing publications
+
+6. **BibTeX Management**:
    - Import publications from BibTeX strings or files
    - Export individual publications as BibTeX
+   - Export bulk publications as BibTeX (all or filtered)
    - Automatic duplicate detection during import
    - Detailed error reporting for failed imports
 
-6. **Data Export**:
+7. **Data Export**:
    - Export individual publications as BibTeX
-   - Export filtered or searched publication lists as JSON
+   - Export filtered or searched publication lists as JSON or BibTeX
+   - Export all scraped publications as BibTeX
    - Use exported data for integration with other systems
 
-7. **Author Management**:
+8. **Author Management**:
+   - View all authors with publication counts
+   - Edit author details (forename, lastname, email, affiliation)
+   - Merge duplicate author entries
+   - Delete authors (removes from all publications)
    - Authors are automatically created during publication import
-   - Link publications to existing authors
-   - Maintain consistent author information across publications
    - Filter publications by specific author
+   - Maintain consistent author information across publications
 
 ## Development
 
@@ -114,21 +148,56 @@ A Docker-based publication list system that allows users to manage academic publ
 - `backend/`: FastAPI backend service
   - `app/`: Application code
     - `models/`: Database models
-    - `routers/`: API endpoints for publications and users
+      - `database.py`: Database connection and session management
+      - `models.py`: SQLAlchemy models (Publication, Author, User, ScrapedPublication, etc.)
+    - `routers/`: API endpoints
+      - `publications.py`: Publication CRUD and BibTeX import/export
+      - `users.py`: User authentication and management
+      - `scraping.py`: Web scraping and text-to-BibTeX conversion
+      - `authors.py`: Author management (view, edit, merge, delete)
     - `schemas/`: Pydantic schemas for data validation
-    - `auth/`: Authentication logic and JWT handling
-    - `utils/`: Utility functions including BibTeX processing
+      - `schemas.py`: Request/response models for API endpoints
+    - `auth/`: Authentication logic
+      - `auth.py`: JWT token generation and verification
+      - `login_tracker.py`: Login attempt tracking and security
+    - `utils/`: Utility functions
+      - `bibtex_processor.py`: BibTeX parsing and generation with author name abbreviation
+      - `sql_importer.py`: SQL database import utilities
+  - `requirements.txt`: Python dependencies
+  - `Dockerfile`: Container configuration for development
 - `frontend/`: React frontend
   - `src/`: Source code
-    - `components/`: React components (Navbar, Footer)
+    - `components/`: Reusable React components
+      - `Navbar.js`: Navigation bar with authentication state
+      - `Footer.js`: Application footer
     - `pages/`: Page components for all features
-    - `services/`: API services for backend communication
-    - `styles/`: CSS styles for the application
+      - `PublicationsList.js`: Main publications view with filtering
+      - `PublicationDetail.js`: Detailed publication view
+      - `CreatePublication.js`: Manual publication creation form
+      - `EditPublication.js`: Publication editing interface
+      - `ImportBibtex.js`: BibTeX file/text import interface
+      - `Scraping.js`: Web scraping interface (MCML and custom URLs)
+      - `ScrapedPublications.js`: Review and manage scraped publications
+      - `Authors.js`: Author management interface
+      - `Login.js`: User authentication
+      - `Register.js`: User registration
+    - `services/`: API services
+      - `api.js`: Axios-based API client for backend communication
+    - `styles/`: CSS styles
+      - `App.css`: Application-wide styles
+  - `public/`: Static assets and images
+  - `package.json`: Node.js dependencies
+  - `Dockerfile`: Container configuration for development
+- `production/`: Production deployment configuration
+  - `Dockerfile.production`: Multi-stage Docker build for production
+  - `nginx.conf`: Nginx configuration for serving frontend and proxying API
+  - `supervisord.conf`: Process management for running both frontend and backend
 - `data/`: Persistent data storage and import utilities
   - `publications.db`: SQLite database for development
-  - `mcml_matching/`: Scripts for publication matching and BibTeX extraction
-  - `old_bib_online_crawling/`: JavaScript utilities for crawling bibliographic data
-  - `old_bib_sql_dump/`: SQL import utilities and BibTeX converters
+- `docker-compose.yml`: Development environment orchestration
+- `docker-compose.production.yml`: Production environment orchestration
+- `.env.example`: Environment variable template
+- `README.md`: This file
 
 ### Data Processing Capabilities
 
@@ -158,6 +227,10 @@ For production deployment:
 2. Configure CORS settings in `backend/app/main.py`
 3. Set up HTTPS for both frontend and backend
 4. Consider using a more robust database like PostgreSQL
+
+## Disclaimer
+
+**AI-Generated Code**: Most of the code in this project has been generated using AI assistance. While functional, it may not follow all best practices or optimal design patterns. Use in production environments at your own discretion and ensure thorough testing and security review.
 
 ## License
 
