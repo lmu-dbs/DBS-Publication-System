@@ -2,9 +2,10 @@ import os
 import logging
 import sqlite3
 from pathlib import Path
-from sqlalchemy import text
+
 
 logger = logging.getLogger(__name__)
+
 
 def execute_sql_file_sqlite(engine, sql_file_path):
     """
@@ -76,6 +77,7 @@ def execute_sql_file_sqlite(engine, sql_file_path):
     except Exception as e:
         logger.error(f"Error executing SQL file for SQLite: {str(e)}")
         return False
+
 
 def initialize_database_from_sql(engine):
     """

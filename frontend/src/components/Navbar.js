@@ -125,6 +125,16 @@ const Navbar = () => {
             >
               Publications
             </Nav.Link>
+            <Nav.Link 
+              as={Link} 
+              to="/authors" 
+              onClick={handleClose} 
+              style={{...navLinkStyle, ...(hoveredLink === 'authors' ? navLinkHoverStyle : {})}} 
+              onMouseEnter={() => setHoveredLink('authors')}
+              onMouseLeave={() => setHoveredLink(null)}
+            >
+              Authors
+            </Nav.Link>
             {isLoggedIn && (
               <>
                 <Nav.Link 
@@ -147,6 +157,26 @@ const Navbar = () => {
                 >
                   Import BibTeX
                 </Nav.Link>
+                <Nav.Link 
+                  as={Link} 
+                  to="/scraping" 
+                  onClick={handleClose} 
+                  style={{...navLinkStyle, ...(hoveredLink === 'scraping' ? navLinkHoverStyle : {})}} 
+                  onMouseEnter={() => setHoveredLink('scraping')}
+                  onMouseLeave={() => setHoveredLink(null)}
+                >
+                  Scrape Publications
+                </Nav.Link>
+                  <Nav.Link 
+                    as={Link} 
+                    to="/scraped-publications" 
+                    onClick={handleClose} 
+                    style={{...navLinkStyle, ...(hoveredLink === 'scraped' ? navLinkHoverStyle : {})}} 
+                    onMouseEnter={() => setHoveredLink('scraped')}
+                    onMouseLeave={() => setHoveredLink(null)}
+                  >
+                    Scraped Publications
+                  </Nav.Link>
               </>
             )}
             <hr style={{borderColor: 'rgba(255, 255, 255, 0.2)'}} />

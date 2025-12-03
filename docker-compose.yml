@@ -18,6 +18,8 @@ services:
       - ADMIN_USERNAME=admin
       - ADMIN_PASSWORD=root
       - SERVE_STATIC=false
+      - HF_TOKEN=${HF_TOKEN}
+      - NVIDIA_TOKEN=${NVIDIA_TOKEN}
     restart: unless-stopped
 
   frontend:

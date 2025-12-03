@@ -23,6 +23,11 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
+export const reprocessScrapedPublication = async (id) => {
+  const response = await api.post(`/scraping/scraped/${id}/reprocess`);
+  return response.data;
+};
+
 // Authentication services
 export const authService = {
   login: async (username, password) => {
@@ -46,8 +51,59 @@ export const authService = {
   }
 };
 
+// Scraping services
+export const scrapeUrl = async (url) => {
+  const response = await api.post('/scraping', { url });
+  return response.data;
+};
+
+export const getScrapedPublications = async () => {
+  const response = await api.get('/scraping/scraped');
+  return response.data;
+};
+
+export const updateScrapedPublication = async (id, data) => {
+  const response = await api.put(`/scraping/scraped/${id}`, data);
+  return response.data;
+};
+
+export const addScrapedToMain = async (id) => {
+  const response = await api.post(`/scraping/scraped/${id}/add`);
+  return response.data;
+};
+
+export const scrapeMCML = async () => {
+  const response = await api.post('/scraping/mcml');
+  return response.data;
+};
+
+export const getScrapingStatus = async (entryId) => {
+  const response = await api.get(`/scraping/${entryId}`);
+  return response.data;
+};
+
+export const getScrapingHistory = async () => {
+  const response = await api.get('/scraping/history');
+  return response.data;
+};
+
+export const deleteScrapingEntry = async (entryId) => {
+  const response = await api.delete(`/scraping/${entryId}`);
+  return response.data;
+};
+
+export const exportScrapedBibtex = async () => {
+  const response = await api.get('/scraping/scraped/export/bibtex', {
+    responseType: 'blob'
+  });
+  return response;
+};
+
 // Publications services
 export const publicationService = {
+  deleteScrapedPublications: async () => {
+    return await api.delete('/publications/scraped');
+  },
   getPublications: async (authorId = null, search = null, venue = null, year = null, keyword = null) => {
     let url = '/publications';
     const params = {};
@@ -121,5 +177,30 @@ export const publicationService = {
     if (keyword) params.keyword = keyword;
     
     return await api.get(url, { params });
+  }
+};
+
+// Authors services
+export const authorService = {
+  getAuthors: async () => {
+    return await api.get('/authors');
+  },
+
+  getAuthor: async (id) => {
+    return await api.get(`/authors/${id}`);
+  },
+
+  updateAuthor: async (id, authorData) => {
+    return await api.put(`/authors/${id}`, authorData);
+  },
+
+  deleteAuthor: async (id) => {
+    return await api.delete(`/authors/${id}`);
+  },
+
+  mergeAuthors: async (sourceId, targetId) => {
+    return await api.post('/authors/merge', null, {
+      params: { source_id: sourceId, target_id: targetId }
+    });
   }
 };

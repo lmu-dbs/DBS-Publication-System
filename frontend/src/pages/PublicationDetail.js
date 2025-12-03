@@ -97,7 +97,12 @@ const PublicationDetail = () => {
               )}
               <Link to={`/publications/author/${author.id}`} className="author-link">
                 {author.forename && author.lastname 
-                  ? `${author.forename} ${author.lastname}`
+                  ? (() => {
+                      // Abbreviate forename to initials
+                      const forename_parts = author.forename.split(' ');
+                      const initials = forename_parts.map(part => part.charAt(0).toUpperCase() + '.').join(' ');
+                      return `${initials} ${author.lastname}`;
+                    })()
                   : author.name}
               </Link>
             </React.Fragment>

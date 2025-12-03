@@ -1,4 +1,5 @@
 import re
+import logging
 from typing import Dict, List, Any, Tuple, Optional
 
 # Only importing the parse_string function that we actually use
@@ -11,6 +12,10 @@ from sqlalchemy.orm import Session
 from ..models.models import Author
 
 
+# Module logger
+logger = logging.getLogger(__name__)
+
+
 def parse_bibtex(bibtex_string: str) -> Dict[str, Any]:
     """
     Parse a BibTeX string and extract publication information.
@@ -21,9 +26,12 @@ def parse_bibtex(bibtex_string: str) -> Dict[str, Any]:
     Returns:
         Dictionary with publication data
     """
+    def _try_parse(s: str):
+        return parse_string(s, 'bibtex')
+
     try:
         # Parse the BibTeX string
-        bibliography = parse_string(bibtex_string, 'bibtex')
+        bibliography = _try_parse(bibtex_string)
         
         if not bibliography.entries:
             raise ValueError("No entries found in BibTeX")
@@ -64,7 +72,106 @@ def parse_bibtex(bibtex_string: str) -> Dict[str, Any]:
         return publication_data
     
     except Exception as e:
+        # If parsing fails because the author list is comma-separated
+        # (e.g. "Durani, W., Jahn, P., Seidl, T."), try a normalization
+        # pass that converts sequences of "Last, F., Next, G., ..." into
+        # "Last, F. and Next, G. and ..." which pybtex can parse.
+        msg = str(e)
+        try:
+            if 'Too many commas' in msg or 'comma' in msg.lower() or 'author' in msg.lower():
+                normalized = _normalize_author_commas(bibtex_string)
+                if normalized != bibtex_string:
+                    # Log that we attempted a normalization pass
+                    logger.info("parse_bibtex: attempting author normalization due to parse error")
+                    bibliography = _try_parse(normalized)
+                    # If successful, continue with the normalized bibliography
+                    # proceed as usual by extracting the first entry
+                    entry_key = list(bibliography.entries.keys())[0]
+                    entry = bibliography.entries[entry_key]
+
+                    publication_type = entry.type
+                    fields = entry.fields
+
+                    publication_data = {
+                        "title": fields.get("title", "").replace("{", "").replace("}", ""),
+                        "year": int(fields.get("year", 0)),
+                        "venue": fields.get("journal", fields.get("booktitle", "")),
+                        "publication_type": publication_type,
+                        "doi": fields.get("doi", ""),
+                        "url": fields.get("url", ""),
+                    }
+
+                    authors = []
+                    for person in entry.persons.get("author", []):
+                        name = " ".join([" ".join(part) for part in (person.first(), person.middle(), person.last()) if part])
+                        authors.append(name)
+
+                    publication_data["authors"] = authors
+                    if "abstract" in fields:
+                        publication_data["abstract"] = fields["abstract"]
+
+                    # Log successful parse after normalization for debugging
+                    logger.info(
+                        "parse_bibtex: successfully parsed after author normalization; title=%s, authors=%s",
+                        publication_data.get("title"), publication_data.get("authors")
+                    )
+                    return publication_data
+        except Exception:
+            # fall through to raising the original error
+            pass
+
         raise ValueError(f"Failed to parse BibTeX: {str(e)}")
+
+
+def _normalize_author_commas(bibtex_string: str) -> str:
+    """
+    Normalize author fields which are given as a comma-separated list
+    like "Durani, W., Jahn, P., Seidl, T." into a string that uses
+    " and " between authors: "Durani, W. and Jahn, P. and Seidl, T.".
+
+    This tries to be conservative: only rewrites author fields that
+    do not already contain " and ".
+    """
+    def replace(match):
+        prefix = match.group(1)
+        authors_text = match.group(2).strip()
+        suffix = match.group(3)
+
+        # If it's already using ' and ' or semicolons, leave it
+        if ' and ' in authors_text or ';' in authors_text:
+            return match.group(0)
+
+        # Split on comma and try to pair tokens into lastname + initials
+        tokens = [t.strip() for t in re.split(r',\s*', authors_text) if t.strip()]
+        # If we see an even number of tokens and at least 4 (i.e. 2+ authors),
+        # assume tokens are [Last, Initials, Last, Initials, ...]
+        if len(tokens) >= 4 and len(tokens) % 2 == 0:
+            pairs = []
+            for i in range(0, len(tokens), 2):
+                lastname = tokens[i]
+                initials = tokens[i+1]
+                pairs.append(f"{lastname}, {initials}")
+            new_authors = ' and '.join(pairs)
+            logger.info("normalize_author_commas: original=%r normalized=%r", authors_text, new_authors)
+            return f"{prefix}{new_authors}{suffix}"
+
+        # If it's not the even-token pattern, try a heuristic: if many commas
+        # but no 'and', replace the last few ", " between author groups with " and "
+        # Split by comma sequences like '., ' which often terminate initials
+        heuristic = re.split(r'(?<=\.),\s*', authors_text)
+        if len(heuristic) > 1:
+            cleaned = ' and '.join([h.strip() for h in heuristic if h.strip()])
+            logger.info("normalize_author_commas (heuristic): original=%r normalized=%r", authors_text, cleaned)
+            return f"{prefix}{cleaned}{suffix}"
+
+        # Otherwise leave unchanged
+        return match.group(0)
+
+    # Match author = { ... } or author = "..."
+    pattern = re.compile(r'(author\s*=\s*[\{\"])(.*?)([\}\"])', re.IGNORECASE | re.DOTALL)
+    new = pattern.sub(replace, bibtex_string)
+    return new
+
 
 def generate_bibtex(title: str, authors: List[str], year: int, venue: str, 
                     publication_type: str, doi: str = None) -> str:
@@ -97,9 +204,25 @@ def generate_bibtex(title: str, authors: List[str], year: int, venue: str,
     # Add title
     bibtex += f"  title = {{{title}}},\n"
     
-    # Add authors
+    # Add authors with abbreviated forenames
     if authors:
-        author_string = " and ".join(authors)
+        abbreviated_authors = []
+        for author in authors:
+            forename, lastname = parse_author_name(author)
+            
+            # Abbreviate the forename to initials
+            if forename:
+                # Split forename into parts and get first letter of each
+                forename_parts = forename.split()
+                initials = '. '.join([part[0].upper() for part in forename_parts if part]) + '.'
+                abbreviated_author = f"{lastname}, {initials}"
+            else:
+                # If no forename, just use lastname
+                abbreviated_author = lastname
+            
+            abbreviated_authors.append(abbreviated_author)
+        
+        author_string = " and ".join(abbreviated_authors)
         bibtex += f"  author = {{{author_string}}},\n"
     
     # Add year
@@ -191,11 +314,34 @@ def parse_bibtex_file(bibtex_content: str) -> List[Dict[str, Any]]:
                 if "abstract" in entry:
                     publication_data["abstract"] = entry["abstract"]
                 
-                # Add original BibTeX string
+                # Add original BibTeX string with abbreviated author names
                 original_entry = "@" + entry["ENTRYTYPE"] + "{" + entry["ID"] + ",\n"
                 for key, value in entry.items():
                     if key not in ["ENTRYTYPE", "ID"]:
-                        original_entry += f"  {key} = {{{value}}},\n"
+                        # Special handling for author field - abbreviate forenames
+                        if key == "author":
+                            # Parse and abbreviate each author
+                            authors = [author.strip() for author in value.split(" and ")]
+                            abbreviated_authors = []
+                            for author in authors:
+                                forename, lastname = parse_author_name(author)
+                                
+                                # Abbreviate the forename to initials
+                                if forename:
+                                    # Split forename into parts and get first letter of each
+                                    forename_parts = forename.split()
+                                    initials = '. '.join([part[0].upper() for part in forename_parts if part]) + '.'
+                                    abbreviated_author = f"{lastname}, {initials}"
+                                else:
+                                    # If no forename, just use lastname
+                                    abbreviated_author = lastname
+                                
+                                abbreviated_authors.append(abbreviated_author)
+                            
+                            abbreviated_value = " and ".join(abbreviated_authors)
+                            original_entry += f"  {key} = {{{abbreviated_value}}},\n"
+                        else:
+                            original_entry += f"  {key} = {{{value}}},\n"
                 original_entry += "}"
                 publication_data["bibtex"] = original_entry
                 
@@ -209,6 +355,7 @@ def parse_bibtex_file(bibtex_content: str) -> List[Dict[str, Any]]:
     
     except Exception as e:
         raise ValueError(f"Failed to parse BibTeX file: {str(e)}")
+
 
 def batch_process_bibtex(bibtex_content: str) -> Tuple[List[Dict[str, Any]], int, int, int, int, List[Dict[str, Any]]]:
     """

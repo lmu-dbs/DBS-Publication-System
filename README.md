@@ -31,6 +31,19 @@ A Docker-based publication list system that allows users to manage academic publ
 
 ## Getting Started
 
+### Environment Setup
+
+1. Create a `.env` file in the root directory (copy from `.env.example`):
+   ```bash
+   cp .env.example .env
+   ```
+
+2. Edit the `.env` file and add your API keys:
+   - `HF_TOKEN`: Your Hugging Face API token (required for accessing HF models)
+   - `NVIDIA_TOKEN`: Your NVIDIA NIM API key (optional, but recommended for better performance)
+   
+   **Note**: The system uses NVIDIA NIM API for text-to-BibTeX conversion by default, with automatic fallback to the local Llama model if the API is unavailable or the key is not set.
+
 ### Running the Application
 
 1. Clone this repository:

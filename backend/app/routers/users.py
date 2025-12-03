@@ -4,8 +4,7 @@ from sqlalchemy.orm import Session
 from datetime import timedelta
 
 from ..models.database import get_db
-from ..models.models import User
-from ..schemas.schemas import User as UserSchema, Token
+from ..schemas.schemas import Token
 from ..auth.auth import (
     authenticate_user, 
     create_access_token, 

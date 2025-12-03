@@ -23,6 +23,16 @@ router = APIRouter(
     tags=["publications"],
 )
 
+
+@router.delete("/scraped", status_code=204)
+def delete_scraped_publications(db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
+    """Delete all publications flagged as scraped."""
+    scraped_pubs = db.query(Publication).filter(Publication.is_scraped == True).all()
+    for pub in scraped_pubs:
+        db.delete(pub)
+    db.commit()
+    return None
+
 # Get all publications with optional author filter
 @router.get("/", response_model=List[PublicationSchema])
 def get_publications(
@@ -357,6 +367,18 @@ async def import_bibtex_file(
                 
                 # Get author names
                 author_names = pub_data.pop("authors", [])
+                
+                # Regenerate BibTeX with abbreviated author names to ensure consistency
+                if author_names and pub_data.get("title") and pub_data.get("year"):
+                    from ..utils.bibtex_processor import generate_bibtex
+                    pub_data["bibtex"] = generate_bibtex(
+                        title=pub_data["title"],
+                        authors=author_names,
+                        year=pub_data["year"],
+                        venue=pub_data.get("venue", ""),
+                        publication_type=pub_data.get("publication_type", "article"),
+                        doi=pub_data.get("doi")
+                    )
                 
                 # Create publication
                 pub_data["user_id"] = current_user.id

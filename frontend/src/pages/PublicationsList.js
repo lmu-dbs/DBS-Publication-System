@@ -17,6 +17,9 @@ const PublicationsList = () => {
   const location = useLocation();
   const isAuthenticated = authService.isAuthenticated();
   
+
+  // Removed the "Remove Scraped Publications" button and handler per request
+  
   // Parse URL query parameters
   useEffect(() => {
     const queryParams = new URLSearchParams(location.search);
@@ -221,10 +224,13 @@ const PublicationsList = () => {
     return `${otherAuthors}, and ${lastAuthor}`;
   };
   
-  // Display author name using forename and lastname when available
+  // Display author name using abbreviated forename and full lastname
   const formatAuthorName = (author) => {
     if (author.forename && author.lastname) {
-      return `${author.forename} ${author.lastname}`;
+      // Abbreviate forename to initials
+      const forename_parts = author.forename.split(' ');
+      const initials = forename_parts.map(part => part.charAt(0).toUpperCase() + '.').join(' ');
+      return `${initials} ${author.lastname}`;
     }
     return author.name;
   };
@@ -290,9 +296,12 @@ const PublicationsList = () => {
         </h2>
         <div className="mt-3">
           {isAuthenticated && (
-            <Link to="/publications/create" className="btn btn-primary me-2">
-              Add Publication
-            </Link>
+            <>
+              <Link to="/publications/create" className="btn btn-primary me-2">
+                Add Publication
+              </Link>
+              {/* Remove Scraped Publications button removed per request */}
+            </>
           )}
         </div>
       </div>
@@ -401,7 +410,7 @@ const PublicationsList = () => {
                           )}
                           <Link to={`/publications/author/${author.id}${location.search}`}>
                             {author.forename && author.lastname 
-                              ? `${author.forename} ${author.lastname}`
+                              ? formatAuthorName(author)
                               : author.name}
                           </Link>
                         </React.Fragment>

@@ -12,18 +12,18 @@ COPY ./frontend/ ./
 RUN npm run build
 
 # Start with a new Python base image for the final container
-FROM python:3.11-slim
+FROM python:3.11-slim as production-image
 
 WORKDIR /app
+
+# Install Nginx
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential nginx supervisor cmake gcc g++ \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy backend requirements and install dependencies
 COPY ./backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-
-# Install Nginx
-RUN apt-get update && apt-get install -y --no-install-recommends nginx supervisor \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
 
 # Copy built frontend from the frontend-build stage to Nginx's serve directory
 COPY --from=frontend-build /frontend-build/build /var/www/html
