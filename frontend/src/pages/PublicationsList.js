@@ -3,6 +3,18 @@ import { Form, InputGroup, Button, Alert } from 'react-bootstrap';
 import { Link, useParams, useNavigate, useLocation } from 'react-router-dom';
 import { publicationService, authService } from '../services/api';
 
+const PUBLICATION_TYPE_LABELS = {
+  article: 'Article',
+  inproceedings: 'Conference Paper',
+  book: 'Book',
+  incollection: 'Book Chapter',
+  techreport: 'Technical Report',
+  thesis: 'Thesis',
+  phdthesis: 'Dissertation',
+  unpublished: 'Preprint',
+  misc: 'Other',
+};
+
 const PublicationsList = () => {
   const [publications, setPublications] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -421,17 +433,21 @@ const PublicationsList = () => {
                         className="venue-tag"
                         onClick={() => {
                           const queryParams = new URLSearchParams(location.search);
-                          queryParams.set('venue', publication.venue || 'Preprint');
-                          navigate({
-                            pathname: location.pathname,
-                            search: queryParams.toString()
-                          });
+                          if (publication.venue) {
+                            queryParams.set('venue', publication.venue);
+                            navigate({
+                              pathname: location.pathname,
+                              search: queryParams.toString()
+                            });
+                          }
                         }}
-                        style={{ cursor: 'pointer', textDecoration: 'underline' }}
+                        style={{ cursor: publication.venue ? 'pointer' : 'default', textDecoration: publication.venue ? 'underline' : 'none' }}
                       >
-                        {publication.venue 
-                          ? `${publication.venue} (${publication.year})` 
-                          : `Preprint (${publication.year})`}
+                        {publication.venue
+                          ? `${publication.venue} (${publication.year})`
+                          : publication.publication_type && PUBLICATION_TYPE_LABELS[publication.publication_type]
+                            ? `${PUBLICATION_TYPE_LABELS[publication.publication_type]} (${publication.year})`
+                            : `(${publication.year})`}
                       </span>
                     </div>
                     

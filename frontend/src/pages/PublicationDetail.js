@@ -3,6 +3,18 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { Button, Alert } from 'react-bootstrap';
 import { publicationService, authService } from '../services/api';
 
+const PUBLICATION_TYPE_LABELS = {
+  article: 'Article',
+  inproceedings: 'Conference Paper',
+  book: 'Book',
+  incollection: 'Book Chapter',
+  techreport: 'Technical Report',
+  thesis: 'Thesis',
+  phdthesis: 'Dissertation',
+  unpublished: 'Preprint',
+  misc: 'Other',
+};
+
 const PublicationDetail = () => {
   const [publication, setPublication] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -112,12 +124,12 @@ const PublicationDetail = () => {
         <div className="publication-detail-meta">
           <span className="publication-year">{publication.year}</span>
           {publication.publication_type && (
-            <span className="publication-type">{publication.publication_type}</span>
+            <span className="publication-type">
+              {PUBLICATION_TYPE_LABELS[publication.publication_type] || publication.publication_type}
+            </span>
           )}
-          {publication.venue ? (
+          {publication.venue && (
             <span className="publication-venue">{publication.venue}</span>
-          ) : (
-            <span className="publication-venue">Preprint</span>
           )}
         </div>
       </div>

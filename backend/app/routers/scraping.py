@@ -807,16 +807,30 @@ def scrape_website(url: str):
         soup = BeautifulSoup(html_content, 'html.parser')
         publications = []
         
-        # Find the publications div and traverse through siblings
-        print(f"[SCRAPER] Looking for publications div in {url}")
-        publication_div = soup.find("div", id="publications")
-        if not publication_div:
-            print(f"[SCRAPER] !! No publications div found in {url}")
-        if publication_div:
-            print(f"[SCRAPER] Found publications div, looking for entries...")
+        # Find the publications section - try new structure first (h2 "Publications @MCML"),
+        # then fall back to old structure (div id="publications")
+        print(f"[SCRAPER] Looking for publications section in {url}")
+        pub_anchor_div = None
+
+        # New structure: h2 heading "Publications @MCML" inside a div.row
+        for h2 in soup.find_all("h2"):
+            if "Publications" in h2.get_text():
+                pub_anchor_div = h2.parent  # the div.row containing the heading
+                print(f"[SCRAPER] Found publications via h2 heading (new structure)")
+                break
+
+        # Old structure fallback: div id="publications"
+        if not pub_anchor_div:
+            pub_anchor_div = soup.find("div", id="publications")
+            if pub_anchor_div:
+                print(f"[SCRAPER] Found publications via div#publications (old structure)")
+
+        if not pub_anchor_div:
+            print(f"[SCRAPER] !! No publications section found in {url}")
+        if pub_anchor_div:
+            print(f"[SCRAPER] Found publications anchor, looking for entries...")
             publications_found = 0
-            print("[SCRAPER] Looking at publication div structure:")
-            next_div = publication_div.find_next_sibling("div")
+            next_div = pub_anchor_div.find_next_sibling("div")
             print(f"[SCRAPER] Next sibling div found: {next_div is not None}")
             while next_div:
                 inner_divs = next_div.find_all("div")

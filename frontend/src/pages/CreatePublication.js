@@ -134,6 +134,8 @@ const CreatePublication = () => {
                 <option value="incollection">Book Chapter</option>
                 <option value="techreport">Technical Report</option>
                 <option value="thesis">Thesis</option>
+                <option value="phdthesis">Dissertation</option>
+                <option value="unpublished">Preprint</option>
                 <option value="misc">Other</option>
               </Form.Select>
             </Form.Group>
