@@ -48,5 +48,5 @@ ENV SERVE_STATIC=true
 # Expose port
 EXPOSE 80
 
-# Start Nginx and uvicorn using supervisor
-CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
+# Start Nginx and uvicorn using supervisor (create log dir first, it may be shadowed by the data volume mount)
+CMD ["sh", "-c", "mkdir -p /app/data/logs && /usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf"]

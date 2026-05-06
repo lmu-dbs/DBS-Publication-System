@@ -5,8 +5,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .routers import publications, users, scraping, authors
-from .models.database import engine
-from .models.models import Base
+from .models.database import engine, SessionLocal
+from .models.models import Base, Publication, Author, User
 from .utils.sql_importer import initialize_database_from_sql
 
 
@@ -74,3 +74,15 @@ async def startup_db_client():
         initialize_database_from_sql(engine)
     except Exception as e:
         logger.error(f"Error initializing database: {str(e)}")
+
+    db = SessionLocal()
+    try:
+        pub_count = db.query(Publication).count()
+        author_count = db.query(Author).count()
+        user_count = db.query(User).count()
+        logger.info("Database statistics:")
+        logger.info(f"  Publications : {pub_count}")
+        logger.info(f"  Authors      : {author_count}")
+        logger.info(f"  Users        : {user_count}")
+    finally:
+        db.close()
