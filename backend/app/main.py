@@ -93,6 +93,12 @@ def _backfill_fingerprints():
 _run_migrations()
 _backfill_fingerprints()
 
+# ── Startup key check ────────────────────────────────────────────────────────
+_nvidia_token = os.getenv("NVIDIA_TOKEN")
+_hf_token = os.getenv("HF_TOKEN")
+logger.info("NVIDIA_TOKEN: %s", f"set ({_nvidia_token[:8]}...)" if _nvidia_token else "NOT SET")
+logger.info("HF_TOKEN:     %s", f"set ({_hf_token[:8]}...)" if _hf_token else "NOT SET")
+
 
 app = FastAPI(
     title="Publications API",
