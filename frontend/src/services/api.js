@@ -72,6 +72,11 @@ export const addScrapedToMain = async (id) => {
   return response.data;
 };
 
+export const updateMainFromScraped = async (id) => {
+  const response = await api.post(`/scraping/scraped/${id}/update-main`);
+  return response.data;
+};
+
 export const scrapeMCML = async () => {
   const response = await api.post('/scraping/mcml');
   return response.data;
@@ -82,13 +87,21 @@ export const getScrapingStatus = async (entryId) => {
   return response.data;
 };
 
-export const getScrapingHistory = async () => {
-  const response = await api.get('/scraping/history');
+export const getScrapingHistory = async ({ search = '', status = '' } = {}) => {
+  const params = new URLSearchParams();
+  if (search) params.set('search', search);
+  if (status) params.set('status', status);
+  const response = await api.get(`/scraping/history?${params.toString()}`);
   return response.data;
 };
 
 export const deleteScrapingEntry = async (entryId) => {
   const response = await api.delete(`/scraping/${entryId}`);
+  return response.data;
+};
+
+export const deleteAllScrapingHistory = async () => {
+  const response = await api.delete('/scraping/history');
   return response.data;
 };
 

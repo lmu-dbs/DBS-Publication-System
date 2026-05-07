@@ -1,9 +1,32 @@
-from sqlalchemy import Column, Integer, String, Text, ForeignKey, DateTime, Boolean
+from sqlalchemy import Column, Integer, String, Text, ForeignKey, DateTime, Boolean, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from sqlalchemy.ext.declarative import declarative_base
 
 Base = declarative_base()
+
+
+class PublicationFingerprint(Base):
+    """Single source-of-truth for deduplication across Publication and ScrapedPublication.
+    Each row represents one known publication identified by at least one of:
+      - doi (globally unique)
+      - title_hash (sha256 of normalize_title(title))
+    source_table: 'publications' | 'scraped_publications'
+    source_id: the PK in that table
+    """
+    __tablename__ = "publication_fingerprints"
+
+    id = Column(Integer, primary_key=True, index=True)
+    source_table = Column(String, nullable=False, index=True)
+    source_id = Column(Integer, nullable=False, index=True)
+    doi = Column(String, nullable=True, index=True)
+    title_hash = Column(String, nullable=True, index=True)
+    title = Column(String, nullable=True)       # human-readable, for debugging
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("source_table", "source_id", name="uq_fingerprint_source"),
+    )
 
 # Association model for publications and authors (with order)
 class PublicationAuthor(Base):
@@ -37,6 +60,7 @@ class CurrentEntry(Base):
     raw_text = Column(Text)
     bibtex = Column(Text, nullable=True)
     processed = Column(Integer, default=0)  # 0=new, 1=processed
+    content_hash = Column(String, nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     processed_at = Column(DateTime(timezone=True), nullable=True)
     created_by = Column(Integer, ForeignKey("users.id"))
@@ -115,6 +139,7 @@ class ScrapedPublication(Base):
     url = Column(String, nullable=True)
     bibtex = Column(Text, nullable=True)
     raw_text = Column(Text, nullable=True)
+    content_hash = Column(String, nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     # Created by which user

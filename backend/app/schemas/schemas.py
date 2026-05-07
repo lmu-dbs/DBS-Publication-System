@@ -108,6 +108,26 @@ class Publication(PublicationBase):
         from_attributes = True
 
 
+class PublicationListItem(BaseModel):
+    """Lightweight schema for list views — excludes heavy bibtex and raw_text fields."""
+    id: int
+    is_scraped: Optional[bool] = None
+    title: str
+    abstract: Optional[str] = None
+    year: Optional[int] = None
+    venue: Optional[str] = None
+    publication_type: Optional[str] = "article"
+    doi: Optional[str] = None
+    url: Optional[str] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    authors: List[Author] = []
+    user_id: int
+
+    class Config:
+        from_attributes = True
+
+
 # User schemas
 class UserBase(BaseModel):
     email: str

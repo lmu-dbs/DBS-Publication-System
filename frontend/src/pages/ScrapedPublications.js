@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { getScrapedPublications, reprocessScrapedPublication, updateScrapedPublication, addScrapedToMain, exportScrapedBibtex } from '../services/api';
+import { getScrapedPublications, reprocessScrapedPublication, updateScrapedPublication, addScrapedToMain, updateMainFromScraped, exportScrapedBibtex } from '../services/api';
 import { Table, Button, Card, Spinner, Alert } from 'react-bootstrap';
 
 const ScrapedPublications = () => {
@@ -31,6 +31,17 @@ const ScrapedPublications = () => {
         console.error('Failed to add to main DB', err);
         alert('Failed to add publication to main database');
       });
+  };
+
+  const handleUpdateMain = async (id) => {
+    try {
+      const result = await updateMainFromScraped(id);
+      setPublications(prev => prev.filter(p => p.id !== id));
+      alert(`Updated publication in main DB (id: ${result.id}). Fields updated: ${result.updated_fields.join(', ')}`);
+    } catch (err) {
+      console.error('Failed to update main DB', err);
+      alert('Failed to update publication in main database');
+    }
   };
 
   const [editingId, setEditingId] = useState(null);
@@ -151,8 +162,28 @@ const ScrapedPublications = () => {
                   .sort((a, b) => (b.year || 0) - (a.year || 0))
                   .map(pub => {
                     return (
-                      <tr key={pub.id}>
+                      <tr key={pub.id} className={pub.has_more_content ? 'table-warning' : pub.is_similar_match ? 'table-info' : ''}>
                         <td style={{maxWidth: 400}}>
+                          {pub.has_more_content && (
+                            <div className="mb-1">
+                              <span
+                                className="badge bg-warning text-dark me-1"
+                                title={`Already in main DB but scraped version has additional data: ${pub.extra_fields.join(', ')}`}
+                              >
+                                ⬆ Newer version — adds: {pub.extra_fields.join(', ')}
+                              </span>
+                            </div>
+                          )}
+                          {pub.is_similar_match && (
+                            <div className="mb-1">
+                              <span
+                                className="badge bg-info text-dark me-1"
+                                title={`Similar publication already exists in main DB: "${pub.similar_to}"`}
+                              >
+                                ~ Similar to: {pub.similar_to}
+                              </span>
+                            </div>
+                          )}
                           {editingId === pub.id ? (
                             <textarea 
                               className="form-control form-control-sm" 
@@ -204,9 +235,15 @@ const ScrapedPublications = () => {
                             </div>
                           ) : (
                             <div className="d-flex flex-column gap-2">
-                              <Button variant="outline-success" size="sm" onClick={() => handleAddToDatabase(pub.id)}>
-                                Add to Main Database
-                              </Button>
+                              {pub.has_more_content ? (
+                                <Button variant="outline-warning" size="sm" onClick={() => handleUpdateMain(pub.id)}>
+                                  Update Main Database
+                                </Button>
+                              ) : (
+                                <Button variant="outline-success" size="sm" onClick={() => handleAddToDatabase(pub.id)}>
+                                  Add to Main Database
+                                </Button>
+                              )}
                               <Button variant="outline-primary" size="sm" onClick={() => handleReprocessBibtex(pub.id)}>
                                 Reprocess BibTeX
                               </Button>

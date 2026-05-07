@@ -1,8 +1,12 @@
 import os
+import hashlib
 import logging
+import re
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from .routers import publications, users, scraping, authors
 from .models.database import engine, SessionLocal
@@ -14,8 +18,80 @@ from .utils.sql_importer import initialize_database_from_sql
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Create tables in the database
+# Create tables in the database (also creates publication_fingerprints on first run)
 Base.metadata.create_all(bind=engine)
+
+
+def _normalize_title(title: str) -> str:
+    if not title:
+        return ""
+    title = title.lower()
+    title = re.sub(r'[^\w\s]', '', title)
+    return ' '.join(title.split())
+
+
+def _title_hash(title: str) -> str | None:
+    n = _normalize_title(title)
+    if not n:
+        return None
+    return hashlib.sha256(n.encode()).hexdigest()
+
+
+def _run_migrations():
+    """Add columns that didn't exist in earlier schema versions."""
+    col_migrations = [
+        ("current_entries", "content_hash", "VARCHAR"),
+        ("scraped_publications", "content_hash", "VARCHAR"),
+    ]
+    with engine.connect() as conn:
+        for table, column, col_type in col_migrations:
+            try:
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"))
+                conn.commit()
+                logger.info("Migration: added %s.%s", table, column)
+            except Exception:
+                pass  # Column already exists
+
+
+def _backfill_fingerprints():
+    """Populate publication_fingerprints for any existing rows not yet covered."""
+    from .models.models import PublicationFingerprint, ScrapedPublication
+    db: Session = SessionLocal()
+    try:
+        # Helper: upsert a fingerprint row if not already present
+        def _ensure(source_table: str, source_id: int, title: str | None, doi: str | None):
+            exists = db.query(PublicationFingerprint).filter_by(
+                source_table=source_table, source_id=source_id
+            ).first()
+            if exists:
+                return
+            th = _title_hash(title) if title else None
+            clean_doi = doi.strip() if doi and doi.strip() else None
+            db.add(PublicationFingerprint(
+                source_table=source_table,
+                source_id=source_id,
+                doi=clean_doi,
+                title_hash=th,
+                title=title,
+            ))
+
+        for pub in db.query(Publication).all():
+            _ensure("publications", pub.id, pub.title, pub.doi)
+
+        for sp in db.query(ScrapedPublication).all():
+            _ensure("scraped_publications", sp.id, sp.title, sp.doi)
+
+        db.commit()
+        logger.info("Fingerprint backfill complete.")
+    except Exception as e:
+        logger.error("Fingerprint backfill failed: %s", e)
+        db.rollback()
+    finally:
+        db.close()
+
+
+_run_migrations()
+_backfill_fingerprints()
 
 
 app = FastAPI(

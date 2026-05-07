@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { Container, Row, Col, Form, Button, Card, Alert, Tabs, Tab } from 'react-bootstrap';
+import { Container, Row, Col, Form, Button, Card, Alert, Tabs, Tab, Table, InputGroup, Badge } from 'react-bootstrap';
 import { useNavigate } from 'react-router-dom';
-import { scrapeUrl, scrapeMCML, getScrapingStatus, getScrapingHistory, deleteScrapingEntry } from '../services/api';
+import { scrapeUrl, scrapeMCML, getScrapingStatus, getScrapingHistory, deleteScrapingEntry, deleteAllScrapingHistory } from '../services/api';
 
 const Scraping = () => {
   const [url, setUrl] = useState('');
   const [results, setResults] = useState([]);
   const [history, setHistory] = useState([]);
+  const [historySearch, setHistorySearch] = useState('');
+  const [historyStatus, setHistoryStatus] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const navigate = useNavigate();
@@ -15,9 +17,9 @@ const Scraping = () => {
     loadHistory();
   }, []);
 
-  const loadHistory = async () => {
+  const loadHistory = async (search = historySearch, status = historyStatus) => {
     try {
-      const historyData = await getScrapingHistory();
+      const historyData = await getScrapingHistory({ search, status });
       setHistory(historyData);
     } catch (err) {
       console.error('Error loading history:', err);
@@ -56,12 +58,20 @@ const Scraping = () => {
   const handleDelete = async (entryId) => {
     try {
       await deleteScrapingEntry(entryId);
-      // Refresh history after deletion
       loadHistory();
-      // Remove from current results if present
       setResults(prev => prev.filter(result => result.entry_id !== entryId));
     } catch (err) {
       setError(err.message || 'Failed to delete entry');
+    }
+  };
+
+  const handleDeleteAllHistory = async () => {
+    if (!window.confirm('Delete all scraping history entries? This cannot be undone.')) return;
+    try {
+      await deleteAllScrapingHistory();
+      loadHistory();
+    } catch (err) {
+      setError(err.message || 'Failed to delete history');
     }
   };
 
@@ -149,55 +159,97 @@ const Scraping = () => {
 
             <Tab eventKey="history" title="Scraping History">
               <div className="mt-3">
+                <Row className="mb-3 g-2">
+                  <Col xs={12} md={6}>
+                    <InputGroup>
+                      <Form.Control
+                        placeholder="Search by title or URL…"
+                        value={historySearch}
+                        onChange={e => {
+                          setHistorySearch(e.target.value);
+                          loadHistory(e.target.value, historyStatus);
+                        }}
+                      />
+                      {historySearch && (
+                        <Button variant="outline-secondary" onClick={() => { setHistorySearch(''); loadHistory('', historyStatus); }}>✕</Button>
+                      )}
+                    </InputGroup>
+                  </Col>
+                  <Col xs={12} md={3}>
+                    <Form.Select
+                      value={historyStatus}
+                      onChange={e => { setHistoryStatus(e.target.value); loadHistory(historySearch, e.target.value); }}
+                    >
+                      <option value="">All statuses</option>
+                      <option value="processed">Processed</option>
+                      <option value="duplicate">Duplicate</option>
+                      <option value="processing">Processing</option>
+                      <option value="error">Error</option>
+                    </Form.Select>
+                  </Col>
+                  <Col xs={6} md={2}>
+                    <Button variant="outline-secondary" className="w-100" onClick={() => loadHistory()}>
+                      Refresh
+                    </Button>
+                  </Col>
+                  <Col xs={6} md={1}>
+                    <Button variant="outline-danger" className="w-100" onClick={handleDeleteAllHistory} disabled={history.length === 0}>
+                      Delete All
+                    </Button>
+                  </Col>
+                </Row>
+
                 {history.length === 0 ? (
-                  <Alert variant="info">No previous scraping entries found.</Alert>
+                  <Alert variant="info">No entries found.</Alert>
                 ) : (
-                  history.map((entry) => (
-                    <Card key={entry.id} className="mb-3">
-                      <Card.Body>
-                        <div className="d-flex justify-content-between align-items-start">
-                          <Card.Title>Scraping Entry #{entry.id}</Card.Title>
-                          <Button 
-                            variant="outline-danger" 
-                            size="sm"
-                            onClick={() => handleDelete(entry.id)}
-                          >
-                            Delete
-                          </Button>
-                        </div>
-                        <Card.Text>
-                          <div>
-                            Status: {' '}
-                            <span className={
-                              entry.status === 'processed' ? 'text-success' :
-                              entry.status === 'error' ? 'text-danger' :
-                              'text-warning'
+                  <Table striped bordered hover responsive size="sm">
+                    <thead className="table-dark">
+                      <tr>
+                        <th>#</th>
+                        <th>Title</th>
+                        <th>URL</th>
+                        <th>Batch</th>
+                        <th>Status</th>
+                        <th>Created</th>
+                        <th>Processed</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {history.map(entry => (
+                        <tr key={entry.id}>
+                          <td>{entry.id}</td>
+                          <td style={{maxWidth: 300}}>
+                            <span style={{fontSize: '0.85rem'}}>{entry.title || <span className="text-muted">—</span>}</span>
+                          </td>
+                          <td style={{maxWidth: 200}}>
+                            <span className="text-muted" style={{fontSize: '0.8rem', wordBreak: 'break-all'}}>{entry.url}</span>
+                          </td>
+                          <td style={{fontSize: '0.8rem'}}>{entry.batch_id || <span className="text-muted">—</span>}</td>
+                          <td>
+                            <Badge bg={
+                              entry.status === 'processed' ? 'success' :
+                              entry.status === 'duplicate' ? 'secondary' :
+                              entry.status === 'error' ? 'danger' : 'warning'
                             }>
                               {entry.status}
-                            </span>
-                          </div>
-                          <div className="text-muted small">URL: {entry.url}</div>
-                          <div className="text-muted small">
-                            Created: {new Date(entry.created_at).toLocaleString()}
-                          </div>
-                          {entry.processed_at && (
-                            <div className="text-muted small">
-                              Processed: {new Date(entry.processed_at).toLocaleString()}
-                            </div>
-                          )}
-                        </Card.Text>
-                        {entry.status === 'error' ? (
-                          <Alert variant="danger" className="mt-2">
-                            Error: {entry.bibtex}
-                          </Alert>
-                        ) : entry.bibtex && (
-                          <pre className="bg-light p-2 mt-2 rounded small">
-                            {entry.bibtex}
-                          </pre>
-                        )}
-                      </Card.Body>
-                    </Card>
-                  ))
+                            </Badge>
+                          </td>
+                          <td style={{fontSize: '0.8rem', whiteSpace: 'nowrap'}}>{new Date(entry.created_at).toLocaleString()}</td>
+                          <td style={{fontSize: '0.8rem', whiteSpace: 'nowrap'}}>{entry.processed_at ? new Date(entry.processed_at).toLocaleString() : <span className="text-muted">—</span>}</td>
+                          <td>
+                            <Button
+                              variant="outline-danger"
+                              size="sm"
+                              onClick={() => handleDelete(entry.id)}
+                            >
+                              ✕
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </Table>
                 )}
               </div>
             </Tab>

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query, File, UploadFile
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import or_
 from typing import List, Optional
 import json
@@ -9,6 +9,7 @@ from ..models.database import get_db
 from ..models.models import Publication, Author, User, PublicationAuthor
 from ..schemas.schemas import (
     Publication as PublicationSchema,
+    PublicationListItem,
     PublicationCreate,
     PublicationUpdate,
     Author as AuthorSchema,
@@ -17,6 +18,7 @@ from ..schemas.schemas import (
 )
 from ..auth.auth import get_current_active_user
 from ..utils.bibtex_processor import parse_bibtex, generate_bibtex, batch_process_bibtex, get_existing_author, parse_author_name
+from .scraping import upsert_fingerprint, delete_fingerprint
 
 router = APIRouter(
     prefix="/publications",
@@ -34,7 +36,7 @@ def delete_scraped_publications(db: Session = Depends(get_db), current_user: Use
     return None
 
 # Get all publications with optional author filter
-@router.get("/", response_model=List[PublicationSchema])
+@router.get("/", response_model=List[PublicationListItem])
 def get_publications(
     db: Session = Depends(get_db),
     author_id: Optional[int] = None,
@@ -43,9 +45,11 @@ def get_publications(
     year: Optional[int] = None,
     keyword: Optional[str] = None,
     skip: int = 0,
-    limit: int = 1500
+    limit: int = 500
 ):
-    query = db.query(Publication)
+    query = db.query(Publication).options(
+        selectinload(Publication.author_associations).selectinload(PublicationAuthor.author)
+    )
     
     # Filter by author if author_id is provided
     if author_id is not None:
@@ -160,6 +164,8 @@ def create_publication(
     
     db.commit()
     db.refresh(db_publication)
+    upsert_fingerprint(db, "publications", db_publication.id, db_publication.title, db_publication.doi)
+    db.commit()
     
     return db_publication
 
@@ -230,6 +236,8 @@ def update_publication(
     
     db.commit()
     db.refresh(db_publication)
+    upsert_fingerprint(db, "publications", db_publication.id, db_publication.title, db_publication.doi)
+    db.commit()
     
     return db_publication
 
@@ -248,6 +256,7 @@ def delete_publication(
     if db_publication.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to delete this publication")
     
+    delete_fingerprint(db, "publications", db_publication.id)
     db.delete(db_publication)
     db.commit()
     
@@ -317,6 +326,8 @@ def import_bibtex(
         
         db.commit()
         db.refresh(db_publication)
+        upsert_fingerprint(db, "publications", db_publication.id, db_publication.title, db_publication.doi)
+        db.commit()
         
         return db_publication
         
@@ -436,6 +447,16 @@ async def import_bibtex_file(
                 failed_entries.append(entry_info)
         
         # Commit all changes at once
+        db.commit()
+
+        # Backfill fingerprints for all newly created publications
+        for pub_data_item in publications_data:
+            # publications_data entries may have already been popped; rely on query
+            pass
+        # Upsert fingerprints for every main-DB pub that lacks one (safe no-op if exists)
+        from ..models.models import PublicationFingerprint
+        for pub in db.query(Publication).filter(Publication.user_id == current_user.id).all():
+            upsert_fingerprint(db, "publications", pub.id, pub.title, pub.doi)
         db.commit()
         
         # Return statistics and detailed entry information

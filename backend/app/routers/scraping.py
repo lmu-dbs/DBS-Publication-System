@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.orm import Session
 import sys
 import os
+import hashlib
 from datetime import datetime
 from pydantic import BaseModel, HttpUrl
 import requests
@@ -174,6 +175,90 @@ from ..models.models import ScrapedPublication
 import re
 from fastapi import Body
 
+def _build_main_title_index(db: Session):
+    """Query title + key content fields from main publications and build lookup structures.
+    Returns:
+      exact_dict: {normalized_title: row}  — O(1) exact-match lookup with content data
+      normalized_main: [(normalized_title, row), ...]  — for similarity scan
+    """
+    rows = db.query(
+        Publication.title,
+        Publication.abstract,
+        Publication.doi,
+        Publication.url,
+        Publication.venue,
+    ).filter(Publication.title.isnot(None)).all()
+    normalized_main = []
+    exact_dict = {}
+    for r in rows:
+        n = normalize_title(r.title)
+        if n:
+            exact_dict[n] = r
+            normalized_main.append((n, r))
+    return exact_dict, normalized_main
+
+
+def _extra_content_fields(entry, main_row) -> list:
+    """Return a list of field names present in the scraped entry but missing in the main publication."""
+    extra = []
+    for field in ('abstract', 'doi', 'url', 'venue'):
+        entry_val = getattr(entry, field, None)
+        main_val = getattr(main_row, field, None)
+        if entry_val and not main_val:
+            extra.append(field)
+    return extra
+
+
+def _check_against_main_db(entry, exact_dict: dict, normalized_main: list):
+    """Check whether entry matches a main publication.
+    Returns:
+      match_type: 'exact' | 'similar' | None
+      has_more_content: bool
+      extra_fields: list
+      matched_title: str | None  — original title of the matched main publication
+    """
+    if not entry.title:
+        return None, False, [], None
+    entry_normalized = normalize_title(entry.title)
+    if not entry_normalized:
+        return None, False, [], None
+
+    matched_row = None
+    match_type = None
+    if entry_normalized in exact_dict:
+        matched_row = exact_dict[entry_normalized]
+        match_type = 'exact'
+        print(f"[SCRAPED VIEW] Exact match found: {entry.title}")
+    else:
+        for main_normalized, row in normalized_main:
+            if main_normalized and calculate_similarity(entry_normalized, main_normalized) > 0.85:
+                matched_row = row
+                match_type = 'similar'
+                print(f"[SCRAPED VIEW] High similarity match: {entry.title} ~ {row.title}")
+                break
+
+    if matched_row is None:
+        return None, False, [], None
+
+    extra = _extra_content_fields(entry, matched_row)
+    return match_type, bool(extra), extra, matched_row.title
+
+
+def _parse_authors_from_bibtex(bibtex: str):
+    authors = []
+    bibtex_error = False
+    if bibtex:
+        try:
+            bib_data = parse_bibtex(bibtex)
+            if 'authors' in bib_data and isinstance(bib_data['authors'], list):
+                authors = bib_data['authors']
+            elif 'author' in bib_data:
+                authors = [a.strip() for a in re.split(r'\s+and\s+', bib_data['author']) if a.strip()]
+        except Exception:
+            bibtex_error = True
+    return authors, bibtex_error
+
+
 @router.get("/scraped", response_model=list)
 async def get_scraped_publications(
     current_user: User = Depends(get_current_user),
@@ -181,57 +266,18 @@ async def get_scraped_publications(
 ):
     """Get all scraped publications for the current user that are not already in the main database"""
     entries = db.query(ScrapedPublication).filter(ScrapedPublication.user_id == current_user.id).order_by(ScrapedPublication.created_at.desc()).all()
-    
-    # Get all main publications for comparison
-    main_publications = db.query(Publication).all()
-    
+
+    # Pre-compute normalized main titles once — avoids O(n×m) re-normalization
+    exact_dict, normalized_main = _build_main_title_index(db)
+
     result = []
-    
     for entry in entries:
-        # Check if this scraped publication matches any main publication
-        is_in_main_db = False
-        
-        if entry.title:
-            entry_normalized = normalize_title(entry.title)
-            
-            # Check against all main publications
-            for main_pub in main_publications:
-                if main_pub.title:
-                    main_normalized = normalize_title(main_pub.title)
-                    
-                    # Exact match
-                    if entry_normalized and main_normalized and entry_normalized == main_normalized:
-                        is_in_main_db = True
-                        print(f"[SCRAPED VIEW] Exact match found - Skipping: {entry.title}")
-                        break
-                    
-                    # High similarity match
-                    if entry_normalized and main_normalized:
-                        similarity = calculate_similarity(entry_normalized, main_normalized)
-                        if similarity > 0.85:
-                            is_in_main_db = True
-                            print(f"[SCRAPED VIEW] High similarity match ({similarity:.2f}) - Skipping: {entry.title}")
-                            break
-        
-        # Skip if found in main database
-        if is_in_main_db:
+        match_type, has_more_content, extra_fields, matched_title = _check_against_main_db(entry, exact_dict, normalized_main)
+        # Hide only exact matches that have nothing new to offer
+        if match_type == 'exact' and not has_more_content:
             continue
-        
-        # Try to extract authors from BibTeX
-        authors = []
-        bibtex_error = False
-        if entry.bibtex:
-            try:
-                bib_data = parse_bibtex(entry.bibtex)
-                # parse_bibtex may return either an 'authors' list or an 'author' string
-                if 'authors' in bib_data and isinstance(bib_data['authors'], list):
-                    authors = bib_data['authors']
-                elif 'author' in bib_data:
-                    # Split authors by 'and' and clean up
-                    authors = [a.strip() for a in re.split(r'\s+and\s+', bib_data['author']) if a.strip()]
-            except Exception as e:
-                authors = []
-                bibtex_error = True
+
+        authors, bibtex_error = _parse_authors_from_bibtex(entry.bibtex)
         result.append({
             "id": entry.id,
             "title": entry.title,
@@ -244,9 +290,14 @@ async def get_scraped_publications(
             "bibtex": entry.bibtex,
             "created_at": entry.created_at,
             "publication_type": entry.publication_type,
-            "authors": authors
+            "authors": authors,
+            "already_in_db": match_type == 'exact',
+            "has_more_content": has_more_content,
+            "extra_fields": extra_fields,
+            "is_similar_match": match_type == 'similar',
+            "similar_to": matched_title if match_type == 'similar' else None,
         })
-    
+
     print(f"[SCRAPED VIEW] Returning {len(result)} scraped publications (filtered from {len(entries)} total)")
     return result
 
@@ -263,31 +314,13 @@ async def export_scraped_bibtex(
         ScrapedPublication.user_id == current_user.id
     ).order_by(ScrapedPublication.created_at.desc()).all()
     
-    # Filter out entries already in main database (same logic as get_scraped_publications)
-    main_publications = db.query(Publication).all()
+    # Filter out entries already in main database — pre-compute once to avoid O(n×m) loop
+    # Keep entries that are not in main DB, or are in main DB but have more content
+    exact_dict, normalized_main = _build_main_title_index(db)
     filtered_entries = []
-    
     for entry in entries:
-        is_in_main_db = False
-        
-        if entry.title:
-            entry_normalized = normalize_title(entry.title)
-            
-            for main_pub in main_publications:
-                if main_pub.title:
-                    main_normalized = normalize_title(main_pub.title)
-                    
-                    if entry_normalized and main_normalized and entry_normalized == main_normalized:
-                        is_in_main_db = True
-                        break
-                    
-                    if entry_normalized and main_normalized:
-                        similarity = calculate_similarity(entry_normalized, main_normalized)
-                        if similarity > 0.85:
-                            is_in_main_db = True
-                            break
-        
-        if not is_in_main_db:
+        match_type, has_more_content, _, _ = _check_against_main_db(entry, exact_dict, normalized_main)
+        if match_type != 'exact' or has_more_content:
             filtered_entries.append(entry)
     
     # Combine all BibTeX entries
@@ -381,7 +414,8 @@ async def add_scraped_to_main(
     db.add(pub)
     db.commit()
     db.refresh(pub)
-
+    upsert_fingerprint(db, "publications", pub.id, pub.title, pub.doi)
+    db.commit()
     created_authors = []
     # Try to extract authors from bibtex
     if scraped.bibtex:
@@ -423,6 +457,54 @@ async def add_scraped_to_main(
         "doi": pub.doi,
         "url": pub.url,
         "authors": created_authors
+    }
+
+
+@router.post("/scraped/{scraped_id}/update-main", response_model=dict)
+async def update_main_from_scraped(
+    scraped_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Patch the matching main Publication with fields that are missing there but present in the scraped entry."""
+    scraped = db.query(ScrapedPublication).filter(
+        ScrapedPublication.id == scraped_id,
+        ScrapedPublication.user_id == current_user.id
+    ).first()
+    if not scraped:
+        raise HTTPException(status_code=404, detail="Scraped publication not found")
+
+    # Find the matching main publication by title
+    main_pubs = db.query(Publication).filter(Publication.title.isnot(None)).all()
+    scraped_normalized = normalize_title(scraped.title) if scraped.title else None
+    matched_pub = None
+    if scraped_normalized:
+        for pub in main_pubs:
+            n = normalize_title(pub.title)
+            if n == scraped_normalized or (n and calculate_similarity(scraped_normalized, n) > 0.85):
+                matched_pub = pub
+                break
+
+    if not matched_pub:
+        raise HTTPException(status_code=404, detail="No matching publication found in main database")
+
+    # Patch only the fields missing in the main publication
+    updated_fields = []
+    for field in ('abstract', 'doi', 'url', 'venue'):
+        if getattr(scraped, field) and not getattr(matched_pub, field):
+            setattr(matched_pub, field, getattr(scraped, field))
+            updated_fields.append(field)
+
+    if not updated_fields:
+        raise HTTPException(status_code=400, detail="Main publication already has all available fields")
+
+    db.commit()
+    upsert_fingerprint(db, "publications", matched_pub.id, matched_pub.title, matched_pub.doi)
+    db.commit()
+    return {
+        "id": matched_pub.id,
+        "title": matched_pub.title,
+        "updated_fields": updated_fields,
     }
 
 
@@ -481,6 +563,50 @@ async def update_scraped_publication(
 
 class ScrapingRequest(BaseModel):
     url: HttpUrl
+
+def compute_content_hash(text: str) -> str:
+    """Return a stable SHA-256 hex digest of the normalised raw text."""
+    normalised = " ".join(text.split()).lower()
+    return hashlib.sha256(normalised.encode("utf-8")).hexdigest()
+
+
+def _title_hash(title: str) -> str | None:
+    """SHA-256 of the normalised title; None if title is empty."""
+    n = normalize_title(title)
+    if not n:
+        return None
+    return hashlib.sha256(n.encode("utf-8")).hexdigest()
+
+
+def upsert_fingerprint(db: Session, source_table: str, source_id: int,
+                       title: str | None, doi: str | None) -> None:
+    """Insert or update a PublicationFingerprint row for the given source row."""
+    from ..models.models import PublicationFingerprint
+    clean_doi = doi.strip() if doi and doi.strip() else None
+    th = _title_hash(title) if title else None
+    fp = db.query(PublicationFingerprint).filter_by(
+        source_table=source_table, source_id=source_id
+    ).first()
+    if fp:
+        fp.doi = clean_doi
+        fp.title_hash = th
+        fp.title = title
+    else:
+        db.add(PublicationFingerprint(
+            source_table=source_table,
+            source_id=source_id,
+            doi=clean_doi,
+            title_hash=th,
+            title=title,
+        ))
+
+
+def delete_fingerprint(db: Session, source_table: str, source_id: int) -> None:
+    """Remove the fingerprint row for a deleted source row."""
+    from ..models.models import PublicationFingerprint
+    db.query(PublicationFingerprint).filter_by(
+        source_table=source_table, source_id=source_id
+    ).delete()
 
 def get_normalized_start(text: str) -> str:
     """Get the first 80 characters of text, normalized to only alphabetical characters"""
@@ -542,92 +668,88 @@ def extract_title_from_raw_text(raw_text: str) -> str:
     # Fallback: get first 200 characters
     return raw_text[:200].strip()
 
-def check_duplicate_publication(db: Session, raw_text: str, user_id: int) -> tuple[bool, Publication | None]:
+def _main_pub_has_missing_fields(pub: Publication) -> bool:
+    """Return True if the main publication is missing any enrichable field."""
+    return not all([pub.venue, pub.doi, pub.url, pub.abstract])
+
+
+def check_duplicate_publication(db: Session, raw_text: str, user_id: int) -> tuple[bool, Publication | None, bool]:
     """
-    Check if a publication already exists in the database (both main publications and scraped publications).
-    Returns (is_duplicate, existing_publication)
-    Uses multiple comparison strategies for better accuracy.
+    Check if a publication already exists using the fingerprints table (fast indexed lookups),
+    with a similarity-scan fallback for near-duplicates not yet fingerprinted.
+
+    Returns (is_duplicate, existing_publication, can_upgrade)
+      - is_duplicate   : True when a match is found
+      - existing_publication: the matched Publication row, or None
+      - can_upgrade    : True when main-DB match has missing fields — caller should
+                         still run LLM so the richer version surfaces in the UI
     """
-    from ..models.models import ScrapedPublication
-    
-    # Extract likely title from raw text
+    from ..models.models import ScrapedPublication, PublicationFingerprint
+
     potential_title = extract_title_from_raw_text(raw_text)
     normalized_potential = normalize_title(potential_title)
-    
     if not normalized_potential:
-        return False, None
-    
-    # Query all publications (both main and scraped)
-    publications = db.query(Publication).all()
-    scraped_publications = db.query(ScrapedPublication).filter(ScrapedPublication.user_id == user_id).all()
-    
-    # Strategy 1: Exact normalized title match
-    # Check main publications
-    for pub in publications:
-        if pub.title:
-            normalized_existing = normalize_title(pub.title)
-            if normalized_existing and normalized_existing == normalized_potential:
-                print(f"[DUPLICATE] Exact title match found in main publications: {pub.title}")
-                return True, pub
-    
-    # Check scraped publications
-    for scraped in scraped_publications:
-        if scraped.title:
-            normalized_existing = normalize_title(scraped.title)
-            if normalized_existing and normalized_existing == normalized_potential:
-                print(f"[DUPLICATE] Exact title match found in scraped publications: {scraped.title}")
-                return True, None  # Return None since it's a ScrapedPublication, not Publication
-        # Also check raw_text similarity for scraped publications
-        if scraped.raw_text:
-            scraped_title = extract_title_from_raw_text(scraped.raw_text)
-            normalized_scraped = normalize_title(scraped_title)
-            if normalized_scraped and normalized_scraped == normalized_potential:
-                print(f"[DUPLICATE] Exact raw text match found in scraped publications")
-                return True, None
-    
-    # Strategy 2: High similarity match (>0.85)
-    # Check main publications
-    for pub in publications:
-        if pub.title:
-            normalized_existing = normalize_title(pub.title)
-            if normalized_existing:
-                similarity = calculate_similarity(normalized_existing, normalized_potential)
-                if similarity > 0.85:
-                    print(f"[DUPLICATE] High similarity match ({similarity:.2f}) in main publications: {pub.title}")
-                    return True, pub
-    
-    # Check scraped publications
-    for scraped in scraped_publications:
-        if scraped.title:
-            normalized_existing = normalize_title(scraped.title)
-            if normalized_existing:
-                similarity = calculate_similarity(normalized_existing, normalized_potential)
-                if similarity > 0.85:
-                    print(f"[DUPLICATE] High similarity match ({similarity:.2f}) in scraped publications: {scraped.title}")
-                    return True, None
-        # Also check raw_text similarity
-        if scraped.raw_text:
-            scraped_title = extract_title_from_raw_text(scraped.raw_text)
-            normalized_scraped = normalize_title(scraped_title)
-            if normalized_scraped:
-                similarity = calculate_similarity(normalized_scraped, normalized_potential)
-                if similarity > 0.85:
-                    print(f"[DUPLICATE] High similarity match ({similarity:.2f}) in scraped publications (raw text)")
-                    return True, None
-    
-    # Strategy 3: Check using old method as fallback
+        return False, None, False
+
+    th = _title_hash(potential_title)
+
+    # ── Fast path 1: title hash lookup in fingerprints table ─────────────────
+    if th:
+        fp = db.query(PublicationFingerprint).filter(
+            PublicationFingerprint.title_hash == th
+        ).first()
+        if fp:
+            if fp.source_table == "publications":
+                pub = db.query(Publication).filter(Publication.id == fp.source_id).first()
+                if pub:
+                    return True, pub, _main_pub_has_missing_fields(pub)
+            else:
+                return True, None, False
+
+    # ── Fast path 2: DOI lookup (extract DOI from raw_text heuristically) ────
+    doi_match = re.search(r'10\.\d{4,}/\S+', raw_text)
+    if doi_match:
+        candidate_doi = doi_match.group(0).rstrip('.')
+        fp = db.query(PublicationFingerprint).filter(
+            PublicationFingerprint.doi == candidate_doi
+        ).first()
+        if fp:
+            if fp.source_table == "publications":
+                pub = db.query(Publication).filter(Publication.id == fp.source_id).first()
+                if pub:
+                    return True, pub, _main_pub_has_missing_fields(pub)
+            else:
+                return True, None, False
+
+    # ── Fallback: similarity scan against all fingerprints ───────────────────
+    # Only reaches here for entries not yet in the fingerprints table or with
+    # slightly different titles than previously recorded.
+    all_fps = db.query(PublicationFingerprint).all()
+    for fp in all_fps:
+        if not fp.title:
+            continue
+        fp_normalized = normalize_title(fp.title)
+        if fp_normalized and calculate_similarity(fp_normalized, normalized_potential) > 0.85:
+            if fp.source_table == "publications":
+                pub = db.query(Publication).filter(Publication.id == fp.source_id).first()
+                if pub:
+                    return True, pub, _main_pub_has_missing_fields(pub)
+            else:
+                return True, None, False
+
+    # ── Legacy fallback: normalised-start check ───────────────────────────────
     normalized_text = get_normalized_start(raw_text)
-    for pub in publications:
-        if pub.title and get_normalized_start(pub.title) == normalized_text:
-            print(f"[DUPLICATE] Normalized start match found in main publications: {pub.title}")
-            return True, pub
-    
-    for scraped in scraped_publications:
-        if scraped.raw_text and get_normalized_start(scraped.raw_text) == normalized_text:
-            print(f"[DUPLICATE] Normalized start match found in scraped publications")
-            return True, None
-    
-    return False, None
+    for fp in all_fps:
+        if fp.title and get_normalized_start(fp.title) == normalized_text:
+            if fp.source_table == "publications":
+                pub = db.query(Publication).filter(Publication.id == fp.source_id).first()
+                if pub:
+                    return True, pub, _main_pub_has_missing_fields(pub)
+            else:
+                return True, None, False
+
+    return False, None, False
+
 
 def get_entry_status(processed_value):
     if processed_value == 1:
@@ -643,23 +765,50 @@ def get_entry_status(processed_value):
 async def get_scraping_history(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-    limit: int = 10
+    limit: int = 200,
+    search: str = "",
+    status: str = "",
 ):
     """Get the history of scraping operations"""
-    entries = db.query(CurrentEntry)\
-        .filter(CurrentEntry.created_by == current_user.id)\
-        .order_by(CurrentEntry.created_at.desc())\
-        .limit(limit)\
-        .all()
-    
-    return [{
-        "id": entry.id,
-        "url": entry.url,
-        "status": get_entry_status(entry.processed),
-        "bibtex": entry.bibtex,
-        "created_at": entry.created_at,
-        "processed_at": entry.processed_at
-    } for entry in entries]
+    query = db.query(CurrentEntry).filter(CurrentEntry.created_by == current_user.id)
+
+    if status:
+        status_map = {"processed": 1, "duplicate": 2, "error": -1, "processing": 0}
+        if status in status_map:
+            query = query.filter(CurrentEntry.processed == status_map[status])
+
+    entries = query.order_by(CurrentEntry.created_at.desc()).limit(limit).all()
+
+    results = []
+    search_lower = search.lower() if search else ""
+    for entry in entries:
+        title = extract_title_from_raw_text(entry.raw_text) if entry.raw_text else ""
+        if search_lower and search_lower not in title.lower() and search_lower not in (entry.url or "").lower():
+            continue
+        results.append({
+            "id": entry.id,
+            "url": entry.url,
+            "title": title,
+            "batch_id": entry.batch_id,
+            "status": get_entry_status(entry.processed),
+            "bibtex": entry.bibtex,
+            "created_at": entry.created_at,
+            "processed_at": entry.processed_at,
+        })
+    return results
+
+@router.delete("/history", response_model=dict)
+async def delete_all_scraping_history(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Delete all scraping history entries (CurrentEntry rows) for the current user."""
+    deleted = db.query(CurrentEntry).filter(
+        CurrentEntry.created_by == current_user.id
+    ).delete(synchronize_session=False)
+    db.commit()
+    return {"deleted": deleted}
+
 
 @router.delete("/{entry_id}", response_model=DeleteResponse)
 async def delete_scraping_entry(
@@ -693,27 +842,31 @@ async def process_single_publication(db: Session, entry: CurrentEntry, batch_id:
     """Process a single publication and update its status"""
     try:
         # Check for existing publication with improved duplicate detection
-        is_duplicate, existing_publication = check_duplicate_publication(db, entry.raw_text, entry.created_by)
-        
-        if is_duplicate:
-            # Mark as duplicate
+        is_duplicate, existing_publication, can_upgrade = check_duplicate_publication(db, entry.raw_text, entry.created_by)
+
+        if is_duplicate and not can_upgrade:
+            # Exact duplicate with nothing new — skip
             entry.processed = 2  # Status for duplicates
             entry.processed_at = datetime.utcnow()
             if existing_publication:
-                entry.bibtex = existing_publication.bibtex  # Store the existing bibtex if available
+                entry.bibtex = existing_publication.bibtex
             db.commit()
-            print(f"[SKIPPED] Duplicate publication detected, skipping processing")
+            print(f"[DUPLICATE] id={entry.id} title={entry.raw_text[:80]!r}")
         else:
+            if can_upgrade:
+                print(f"[UPGRADE] id={entry.id} — main DB entry is missing fields, processing for update")
             # Not a duplicate, proceed with text-to-bibtex conversion
+            await asyncio.sleep(0.5)
             bibtex = text_to_bibtex(entry.raw_text)
             
             # Update entry with the new bibtex
             entry.bibtex = bibtex
             entry.processed = 1
             entry.processed_at = datetime.utcnow()
-            
+
             # Process the BibTeX to extract publication data
             from ..models.models import ScrapedPublication
+            content_hash = entry.content_hash or compute_content_hash(entry.raw_text)
             try:
                 pub_data = parse_bibtex(bibtex)
                 # Create new scraped publication with processed data
@@ -725,6 +878,7 @@ async def process_single_publication(db: Session, entry: CurrentEntry, batch_id:
                     url=pub_data["url"],
                     bibtex=bibtex,
                     raw_text=entry.raw_text,
+                    content_hash=content_hash,
                     user_id=entry.created_by,
                     publication_type=pub_data["publication_type"]
                 )
@@ -736,9 +890,12 @@ async def process_single_publication(db: Session, entry: CurrentEntry, batch_id:
                     title=first_line,
                     bibtex=bibtex,
                     raw_text=entry.raw_text,
+                    content_hash=content_hash,
                     user_id=entry.created_by
                 )
             db.add(new_scraped)
+            db.flush()
+            upsert_fingerprint(db, "scraped_publications", new_scraped.id, new_scraped.title, new_scraped.doi)
             db.commit()
     except Exception as e:
         print(f"Error processing publication: {str(e)}")
@@ -755,28 +912,28 @@ async def process_scraped_content(db: Session, source_url: str, current_user_id:
         total_count = len(publications_list)
         
         try:
-            # Create entries for all publications first
+            # Create CurrentEntry rows for all publications, storing their content hash
             entries = []
             for publication_text in publications_list:
+                h = compute_content_hash(publication_text)
                 entry = CurrentEntry(
                     url=source_url,
                     raw_text=publication_text,
                     created_by=current_user_id,
                     processed=0,
+                    content_hash=h,
                     batch_id=batch_id
                 )
                 db.add(entry)
                 entries.append(entry)
             db.commit()
-            
+
             # Process publications in smaller chunks to avoid blocking
             chunk_size = 5  # Process 5 publications at a time
             for i in range(0, len(entries), chunk_size):
                 chunk = entries[i:i + chunk_size]
-                # Process each publication in the chunk
                 for entry in chunk:
                     await process_single_publication(db, entry, batch_id)
-                # Small delay between chunks to allow other requests
                 await asyncio.sleep(0.1)
                 
         except Exception as e:
@@ -836,6 +993,11 @@ def scrape_website(url: str):
                 inner_divs = next_div.find_all("div")
                 if len(inner_divs) >= 2:
                     second_div = inner_divs[1]
+                    # Extract DOI link before removing/stripping anything
+                    doi_url = None
+                    doi_anchor = second_div.find("a", title="DOI")
+                    if doi_anchor and doi_anchor.get("href"):
+                        doi_url = doi_anchor["href"].strip()
                     # Remove details tags as they contain additional info we don't need
                     for details_tag in second_div.find_all("details"):
                         details_tag.decompose()
@@ -844,6 +1006,9 @@ def scrape_website(url: str):
                     for char in ['•', '●', '▪', '‣', '◦', '–', '—', '*']:
                         publication_text = publication_text.replace(char, ' and ')
                     publication_text = publication_text.strip()
+                    # Append DOI URL so downstream processing can extract it
+                    if doi_url:
+                        publication_text = f"{publication_text} DOI: {doi_url}"
                     if publication_text:  # Only add non-empty publications
                         publications_found += 1
                         print(f"[SCRAPER] Found publication {publications_found}: {publication_text[:100]}...")
@@ -877,77 +1042,71 @@ async def scrape_mcml(
     # Initialize results list
     results = []
     batch_id = f"mcml-{int(time.time() * 1000)}"
-    
+
+    # Build a set of hashes already seen (CurrentEntry + ScrapedPublication) to skip known content
+    from ..models.models import ScrapedPublication
+    existing_hashes = {
+        r[0] for r in db.query(CurrentEntry.content_hash).filter(CurrentEntry.content_hash.isnot(None)).all()
+    } | {
+        r[0] for r in db.query(ScrapedPublication.content_hash).filter(ScrapedPublication.content_hash.isnot(None)).all()
+    }
+
     # Loop through each group and scrape their publications
     total_publications = 0
     print("\n[MCML] ==========================================================")
     print("[MCML] Starting scraping of all MCML group publications")
     print("[MCML] ==========================================================\n")
-    
+
     for group, url in MCML_URLS.items():
         print(f"[MCML] Processing group {group} at URL: {url}")
-        
-        # Scrape publications first to see if we get any
+
         publications = scrape_website(url)
         group_count = len(publications)
-        total_publications += group_count
         print(f"[MCML] Found {group_count} publications for group {group}")
         print("[MCML] ----------------------------------------------------------")
-        
-        # If we found publications, then proceed with database operations
-        if publications:
-            # Check if URL already exists and delete all entries with this URL
-            existing_entries = db.query(CurrentEntry).filter(CurrentEntry.url == url).all()
-            if existing_entries:
-                print(f"[MCML] Found {len(existing_entries)} existing entries for {url}, deleting them...")
-                for entry in existing_entries:
-                    db.delete(entry)
-                db.commit()
-            
-            # Create new entry for each publication
-            for pub in publications:
-                new_entry = CurrentEntry(
-                    url=url,
-                    raw_text=pub,
-                    created_by=current_user.id,
-                    processed=0,
-                    batch_id=batch_id
-                )
-                db.add(new_entry)
-                db.commit()
-                db.refresh(new_entry)
-                
-                print(f"Created entry {new_entry.id} with publication text: {pub[:100]}...")
-            
+
+        # Filter to only publications whose content hash has not been seen before
+        new_publications = []
+        for pub in publications:
+            h = compute_content_hash(pub)
+            if h not in existing_hashes:
+                new_publications.append((pub, h))
+                existing_hashes.add(h)  # prevent duplicates within the same batch
+
+        skipped = group_count - len(new_publications)
+        total_publications += len(new_publications)
+        print(f"[MCML] {len(new_publications)} new, {skipped} already seen for group {group}")
+
+        if new_publications:
             results.append({
                 "group": group,
                 "status": "processing",
                 "url": url,
-                "publications_found": len(publications)
+                "publications_found": group_count,
+                "new_publications": len(new_publications),
             })
+            # Pass only the raw texts to the background task (hashes are recomputed there)
+            background_tasks.add_task(
+                process_scraped_content,
+                db=db,
+                source_url=url,
+                current_user_id=current_user.id,
+                publications_list=[pub for pub, _ in new_publications],
+                batch_id=batch_id,
+            )
         else:
             results.append({
                 "group": group,
-                "status": "no_publications",
+                "status": "no_new_publications",
                 "url": url,
-                "publications_found": 0
+                "publications_found": group_count,
+                "new_publications": 0,
             })
-        
-        # Process publications in background
-        background_tasks.add_task(
-            process_scraped_content,
-            db=db,
-            source_url=url,
-            current_user_id=current_user.id,
-            publications_list=publications,  # Use already scraped publications
-            batch_id=batch_id
-        )
-    
+
     print("\n[MCML] ==========================================================")
-    print(f"[MCML] SCRAPING SUMMARY:")
-    print(f"[MCML] Total publications found across all groups: {total_publications}")
+    print(f"[MCML] SCRAPING SUMMARY: {total_publications} new publications queued")
     print("[MCML] ==========================================================\n")
-    
+
     return {
         "results": results,
         "batch_id": batch_id,
